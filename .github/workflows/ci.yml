@@ -1,0 +1,66 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.6-bookworm
+        env:
+          POSTGRES_USER: listva
+          POSTGRES_PASSWORD: integration-test-password
+          POSTGRES_DB: listva_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U listva -d listva_test"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://listva:integration-test-password@localhost:5432/listva_test?schema=public
+      NODE_ENV: test
+      PUBLIC_ORIGIN: http://localhost:8080
+      DB_PASSWORD: compose-test-password
+      GRAFANA_PASSWORD: compose-grafana-test-password
+      HTTP_PORT: '8080'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run db:deploy
+      - run: npm run typecheck
+      - run: npm test
+      - name: Deployment failure scenarios
+        run: bash tests/ops/deploy.test.sh
+      - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - name: Launch production containers
+        run: docker compose up -d --build --wait
+      - name: End-to-end tests against Nginx, API and PostgreSQL
+        run: npm run test:e2e
+        env:
+          E2E_BASE_URL: http://localhost:8080
+      - name: Verify monitoring and backup restore
+        run: bash scripts/smoke.sh
+      - name: Container logs
+        if: failure()
+        run: docker compose logs --no-color --tail 100
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+      - name: Stop test containers
+        if: always()
+        run: docker compose down -v

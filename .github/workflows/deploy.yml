@@ -1,0 +1,97 @@
+name: Build and deploy
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      api: ${{ steps.resolved.outputs.api }}
+      web: ${{ steps.resolved.outputs.web }}
+      sha: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: images
+        env:
+          COMMIT: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          echo "api=ghcr.io/${GITHUB_REPOSITORY,,}-api:$COMMIT" >> "$GITHUB_OUTPUT"
+          echo "web=ghcr.io/${GITHUB_REPOSITORY,,}-web:$COMMIT" >> "$GITHUB_OUTPUT"
+      - id: build_api
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.api }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+      - id: build_web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.images.outputs.web }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+      - id: resolved
+        name: Resolve immutable deployment images
+        env:
+          API_TAG: ${{ steps.images.outputs.api }}
+          WEB_TAG: ${{ steps.images.outputs.web }}
+          API_DIGEST: ${{ steps.build_api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.build_web.outputs.digest }}
+        run: |
+          [[ "$API_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          [[ "$WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+          echo "api=${API_TAG%:*}@$API_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "web=${WEB_TAG%:*}@$WEB_DIGEST" >> "$GITHUB_OUTPUT"
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.publish.outputs.sha }}
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/listva' }}
+          API_IMAGE: ${{ needs.publish.outputs.api }}
+          WEB_IMAGE: ${{ needs.publish.outputs.web }}
+        run: |
+          set -Eeuo pipefail
+          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_/-]+$ ]]
+          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
+          [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
+          tar -czf deploy.tar.gz compose.yaml compose.prod.yaml infra/monitoring scripts
+          scp -o BatchMode=yes deploy.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deploy.tar.gz"
+          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && tar -xzf deploy.tar.gz && API_IMAGE='$API_IMAGE' WEB_IMAGE='$WEB_IMAGE' bash scripts/deploy.sh"

@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String
+  timezone     String    @default("Europe/Moscow")
+  createdAt    DateTime  @default(now())
+  sessions     Session[]
+  plants       Plant[]
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Plant {
+  id           String         @id @default(uuid()) @db.Uuid
+  userId       String         @db.Uuid
+  name         String
+  species      String         @default("")
+  room         String         @default("")
+  note         String         @default("")
+  intervalDays Int            @default(7)
+  icon         String         @default("monstera")
+  createdAt    DateTime       @default(now())
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  waterings    WateringEvent[]
+
+  @@index([userId, createdAt])
+}
+
+model WateringEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  plantId    String   @db.Uuid
+  happenedAt DateTime @default(now())
+  requestId  String   @default(uuid()) @db.Uuid
+  plant      Plant    @relation(fields: [plantId], references: [id], onDelete: Cascade)
+
+  @@unique([plantId, requestId])
+  @@index([plantId, happenedAt])
+}
+
+model PageViewCounter {
+  route String @id
+  total BigInt @default(0)
+}

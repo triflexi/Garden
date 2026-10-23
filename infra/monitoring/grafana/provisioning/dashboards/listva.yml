@@ -1,0 +1,11 @@
+apiVersion: 1
+providers:
+  - name: listva
+    orgId: 1
+    folder: Листва
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 15
+    options:
+      path: /var/lib/grafana/dashboards

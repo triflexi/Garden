@@ -1,0 +1,14 @@
+# Requires Docker Compose >= 2.24.4. Production only pulls verified CI images.
+services:
+  api:
+    image: ${API_IMAGE:?Set API_IMAGE}
+    build: !reset null
+    pull_policy: always
+  migrate:
+    image: ${API_IMAGE:?Set API_IMAGE}
+    build: !reset null
+    pull_policy: always
+  web:
+    image: ${WEB_IMAGE:?Set WEB_IMAGE}
+    build: !reset null
+    pull_policy: always

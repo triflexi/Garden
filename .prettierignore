@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+**/dist
+package-lock.json
+backups
+playwright-report
+test-results
+.env*
+.lock-refresh
+.audit-report.json

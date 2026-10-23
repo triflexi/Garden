@@ -1,0 +1,30 @@
+{
+  "name": "listva",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.0",
+    "js-yaml": "^5.5.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "playwright test",
+    "db:generate": "npm run db:generate -w @listva/api",
+    "db:migrate": "npm run db:migrate -w @listva/api",
+    "db:deploy": "npm run db:deploy -w @listva/api"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "concurrently": "^9.2.1",
+    "prettier": "^3.8.3"
+  }
+}
