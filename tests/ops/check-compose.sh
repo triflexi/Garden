@@ -11,7 +11,9 @@ docker compose --env-file .env.example -f compose.yaml config --format json | no
 const assert=require("node:assert/strict"), fs=require("node:fs"), c=JSON.parse(fs.readFileSync(0,"utf8"));
 assert.equal(c.services.db.ports,undefined);
 assert.equal(c.services.api.ports,undefined);
-assert.equal(c.services.grafana.ports[0].host_ip,"127.0.0.1");
+assert.equal(c.services.grafana.ports[0].host_ip,"0.0.0.0");
+assert.equal(String(c.services.grafana.ports[0].published),"3001");
+assert.equal(c.services.grafana.ports[0].target,3000);
 assert.equal(c.services.api.depends_on.migrate.condition,"service_completed_successfully");'
 docker compose --env-file .env.example -f compose.dev.yaml config --format json | node -e '
 const assert=require("node:assert/strict"), fs=require("node:fs"), c=JSON.parse(fs.readFileSync(0,"utf8"));

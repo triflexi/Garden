@@ -88,5 +88,6 @@ fi
 # Permit the application through an active Ubuntu firewall without changing SSH rules.
 if command -v ufw >/dev/null && as_root ufw status | grep -q '^Status: active'; then
   as_root ufw allow "$http_port/tcp"
+  as_root ufw allow 3001/tcp
 fi
 echo 'VPS dependencies and application directory are ready.'

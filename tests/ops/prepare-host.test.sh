@@ -97,7 +97,7 @@ printf 'ufw %s\n' "$*" >> "$CALL_LOG"
 case "$*" in
   status)
     if [[ "$SCENARIO" == firewall ]]; then echo 'Status: active'; else echo 'Status: inactive'; fi ;;
-  'allow 8088/tcp') [[ "$SCENARIO" == firewall ]] ;;
+  'allow 8088/tcp'|'allow 3001/tcp') [[ "$SCENARIO" == firewall ]] ;;
   *) exit 90 ;;
 esac
 MOCK
@@ -134,7 +134,9 @@ MOCK
     daemon-stopped) assert_called 'systemctl enable --now docker' ;;
     docker-group) assert_called 'usermod -aG docker deploy' ;;
     directory-sudo) assert_called 'install -d -m 0750 -o 1000 -g 1000' ;;
-    firewall) assert_called 'ufw allow 8088/tcp' ;;
+    firewall)
+      assert_called 'ufw allow 8088/tcp'
+      assert_called 'ufw allow 3001/tcp' ;;
     invalid-path) [[ ! -s "$CALL_LOG" ]] ;;
   esac
   printf 'PASS: automatic VPS preparation %s\n' "$scenario"
