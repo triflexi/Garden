@@ -16,7 +16,10 @@ public_host="${DEPLOY_PUBLIC_HOST:-$DEPLOY_HOST}"
 http_port="${DEPLOY_HTTP_PORT:-80}"
 [[ "$deploy_path" =~ ^(/[a-zA-Z0-9_.-]+){2,}/?$ && "/${deploy_path#/}/" != *'/../'* && "/${deploy_path#/}/" != *'/./'* ]] || { echo 'Invalid DEPLOY_PATH' >&2; exit 2; }
 [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$DEPLOY_USER" =~ ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$ ]] || { echo 'Invalid SSH host or user' >&2; exit 2; }
-[[ "$public_host" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ && "$http_port" =~ ^[1-9][0-9]{0,4}$ ]] && (( http_port <= 65535 )) || { echo 'Invalid public host or HTTP port' >&2; exit 2; }
+if [[ ! "$public_host" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*$ || ! "$http_port" =~ ^[1-9][0-9]{0,4}$ ]] || (( http_port > 65535 )); then
+  echo 'Invalid public host or HTTP port' >&2
+  exit 2
+fi
 for image in "$API_IMAGE" "$WEB_IMAGE"; do
   [[ "$image" =~ ^ghcr\.io/[a-z0-9._/-]+@sha256:[0-9a-f]{64}$ ]] || { echo 'Expected an immutable GHCR image digest' >&2; exit 2; }
 done
