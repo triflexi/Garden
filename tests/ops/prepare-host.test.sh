@@ -90,13 +90,17 @@ MOCK
 printf 'usermod %s\n' "$*" >> "$CALL_LOG"
 [[ "$*" == '-aG docker deploy' ]]
 MOCK
-  if [[ "$scenario" == firewall ]]; then
-    cat > "$fixture/bin/ufw" <<'MOCK'
+  # Always shadow the runner's UFW; its installation/state must not affect fixtures.
+  cat > "$fixture/bin/ufw" <<'MOCK'
 #!/usr/bin/env bash
 printf 'ufw %s\n' "$*" >> "$CALL_LOG"
-case "$*" in status) echo 'Status: active' ;; 'allow 8088/tcp') ;; *) exit 90 ;; esac
+case "$*" in
+  status)
+    if [[ "$SCENARIO" == firewall ]]; then echo 'Status: active'; else echo 'Status: inactive'; fi ;;
+  'allow 8088/tcp') [[ "$SCENARIO" == firewall ]] ;;
+  *) exit 90 ;;
+esac
 MOCK
-  fi
   chmod +x "$fixture/bin/"*
   export SCENARIO="$scenario"
   target_path="$fixture/remote/app"
@@ -111,10 +115,19 @@ MOCK
       [[ -d "$target_path" ]] ;;
   esac
   case "$scenario" in
-    installed) assert_not_called apt-get; assert_not_called sudo ;;
+    installed)
+      assert_not_called apt-get
+      assert_not_called usermod
+      assert_not_called systemctl
+      assert_called 'ufw status'
+      assert_not_called 'ufw allow' ;;
     fresh-root|fresh-sudo)
       assert_called 'install -y --no-install-recommends docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin'
-      grep -qF 'URIs: https://download.docker.com/linux/' "$fixture/docker.sources" ;;
+      assert_called 'https://download.docker.com/linux/'
+      # A pre-existing Docker apt source on the runner is intentionally reused.
+      if [[ -f "$fixture/docker.sources" ]]; then
+        grep -qF 'URIs: https://download.docker.com/linux/' "$fixture/docker.sources"
+      fi ;;
     compose-upgrade)
       assert_called 'install -y --no-install-recommends docker-compose-plugin'
       assert_not_called 'docker-ce docker-ce-cli' ;;
