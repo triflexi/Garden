@@ -11,6 +11,8 @@ umask 077
 : "${WEB_IMAGE:?Set WEB_IMAGE}"
 : "${GHCR_USER:?Set GHCR_USER}"
 : "${GHCR_TOKEN:?Set GHCR_TOKEN}"
+: "${GRAFANA_PASSWORD:?Set GRAFANA_PASSWORD in the production environment secrets}"
+bash scripts/grafana-password.sh validate
 deploy_path="${DEPLOY_PATH:-/opt/listva}"
 public_host="${DEPLOY_PUBLIC_HOST:-$DEPLOY_HOST}"
 http_port="${DEPLOY_HTTP_PORT:-80}"
@@ -47,6 +49,7 @@ echo 'Deploying verified images.'
   printf 'cd %q\n' "$deploy_path"
   printf 'export API_IMAGE=%q WEB_IMAGE=%q DEPLOY_HOST=%q DEPLOY_PUBLIC_HOST=%q DEPLOY_HTTP_PORT=%q\n' "$API_IMAGE" "$WEB_IMAGE" "$DEPLOY_HOST" "$public_host" "$http_port"
   printf 'GHCR_USER=%q\nGHCR_TOKEN=%q\n' "$GHCR_USER" "$GHCR_TOKEN"
+  printf 'export GRAFANA_PASSWORD=%q\n' "$GRAFANA_PASSWORD"
   cat <<'REMOTE'
 docker_config="$(mktemp -d /tmp/listva-registry.XXXXXX)"
 cleanup_registry() {

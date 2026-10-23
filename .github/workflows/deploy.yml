@@ -90,4 +90,5 @@ jobs:
           WEB_IMAGE: ${{ needs.publish.outputs.web }}
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GRAFANA_PASSWORD: ${{ secrets.GRAFANA_PASSWORD }}
         run: bash scripts/deploy-ssh.sh
