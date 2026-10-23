@@ -6,6 +6,13 @@ if [[ $# -ne 1 || ! "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo 'Usage: bash scripts/bootstrap.sh YOUR_PUBLIC_IPV4' >&2
   exit 2
 fi
+IFS=. read -r -a octets <<< "$1"
+for octet in "${octets[@]}"; do
+  if [[ ${#octet} -gt 3 ]] || (( 10#$octet > 255 )); then
+    echo 'Invalid IPv4 address' >&2
+    exit 2
+  fi
+done
 command -v docker >/dev/null
 docker compose version
 if [[ -e .env ]]; then
@@ -14,6 +21,8 @@ if [[ -e .env ]]; then
 fi
 db_password="$(openssl rand -hex 32)"
 grafana_password="$(openssl rand -hex 24)"
+# Refuse to overwrite a file created by another bootstrap in the meantime.
+set -o noclobber
 cat > .env <<EOF
 PUBLIC_ORIGIN=http://$1
 HTTP_PORT=80

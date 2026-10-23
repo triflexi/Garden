@@ -3,12 +3,12 @@ services:
   api:
     image: ${API_IMAGE:?Set API_IMAGE}
     build: !reset null
-    pull_policy: always
+    pull_policy: ${DEPLOY_PULL_POLICY:-always}
   migrate:
     image: ${API_IMAGE:?Set API_IMAGE}
     build: !reset null
-    pull_policy: always
+    pull_policy: ${DEPLOY_PULL_POLICY:-always}
   web:
     image: ${WEB_IMAGE:?Set WEB_IMAGE}
     build: !reset null
-    pull_policy: always
+    pull_policy: ${DEPLOY_PULL_POLICY:-always}

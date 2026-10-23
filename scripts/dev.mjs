@@ -32,7 +32,7 @@ for (const child of [api, web]) {
     console.error(error);
     stop(1);
   });
-  child.on('exit', (code) => stop(code ?? 0));
+  child.on('exit', (code, signal) => stop(code ?? (signal ? 1 : 0)));
 }
 process.on('SIGINT', () => stop());
 process.on('SIGTERM', () => stop());

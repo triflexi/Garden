@@ -9,7 +9,31 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 jobs:
+  operations:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        compose: ['v2.24.4', 'latest']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: docker/setup-compose-action@v1
+        with:
+          version: ${{ matrix.compose }}
+      - name: Validate workflows and shell scripts
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" -w /repo rhysd/actionlint:1.7.7
+          docker run --rm -v "$PWD:/repo:ro" -w /repo --entrypoint shellcheck rhysd/actionlint:1.7.7 -x scripts/*.sh tests/ops/*.sh
+      - name: Validate Compose configurations and CLI flags
+        run: bash tests/ops/check-compose.sh
+      - name: Operations success and failure scenarios
+        run: bash tests/ops/run.sh
   verify:
+    needs: operations
     runs-on: ubuntu-latest
     timeout-minutes: 25
     services:
@@ -40,18 +64,18 @@ jobs:
       - run: npm run db:deploy
       - run: npm run typecheck
       - run: npm test
-      - name: Deployment failure scenarios
-        run: bash tests/ops/deploy.test.sh
       - run: npm run build
       - run: npx playwright install --with-deps chromium
       - name: Launch production containers
-        run: docker compose up -d --build --wait
+        run: docker compose up -d --build --wait --wait-timeout 180
       - name: End-to-end tests against Nginx, API and PostgreSQL
         run: npm run test:e2e
         env:
           E2E_BASE_URL: http://localhost:8080
       - name: Verify monitoring and backup restore
         run: bash scripts/smoke.sh
+      - name: Verify database replacement and restore transaction
+        run: bash tests/ops/restore.integration.sh
       - name: Container logs
         if: failure()
         run: docker compose logs --no-color --tail 100

@@ -1,60 +1,82 @@
 #!/usr/bin/env bash
-# Exercise the real deployment script in an isolated directory with fake external commands.
-# These checks cover ordering and rollback; container/database verification is in smoke.sh.
 set -Eeuo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-fixture=''
-cleanup() {
-  if [[ "${fixture:-}" == /tmp/listva-deploy-test.* ]]; then rm -rf -- "$fixture"; fi
-}
-trap cleanup EXIT
+# shellcheck source=tests/ops/helpers.sh
+source "$(dirname "$0")/helpers.sh"
 
-for scenario in healthy migration-fails start-fails health-fails; do
-  fixture="$(mktemp -d /tmp/listva-deploy-test.XXXXXX)"
-  mkdir -p "$fixture/scripts" "$fixture/bin"
-  cp "$root/scripts/deploy.sh" "$root/scripts/backup.sh" "$fixture/scripts/"
-  printf 'HTTP_PORT=80\n' > "$fixture/.env"
-  printf 'API_IMAGE=ghcr.io/example/api:old\nWEB_IMAGE=ghcr.io/example/web:old\n' > "$fixture/.deploy-images.env"
-  cp "$fixture/.deploy-images.env" "$fixture/known-old.env"
+for scenario in healthy first-deploy pull-fails backup-fails empty-backup database-fails migration-fails start-fails health-fails rollback-start-fails rollback-health-fails env-port default-port locked; do
+  new_fixture
+  if [[ "$scenario" != first-deploy ]]; then
+    printf 'API_IMAGE=ghcr.io/example/api:old\nWEB_IMAGE=ghcr.io/example/web:old\n' > "$fixture/.deploy-images.env"
+    cp "$fixture/.deploy-images.env" "$fixture/known-old.env"
+  fi
   cat > "$fixture/bin/docker" <<'MOCK'
 #!/usr/bin/env bash
+set -Eeuo pipefail
 printf '%s|%s|%s\n' "$*" "${API_IMAGE:-}" "${WEB_IMAGE:-}" >> "$CALL_LOG"
+[[ "$1" == compose ]] || exit 90
+shift
+while [[ "${1:-}" == -f ]]; do shift 2; done
 case "$*" in
-  *'exec -T db sh -c pg_dump'*) printf 'test-backup-data'; exit 0 ;;
-  *'run --rm --no-deps migrate'*) [[ "$SCENARIO" != migration-fails ]] || exit 8 ;;
-  *'up -d --no-build --remove-orphans'*) [[ "$SCENARIO" != start-fails ]] || exit 9 ;;
+  'config --quiet') ;;
+  'port web 80')
+    if [[ "$SCENARIO" == default-port ]]; then printf '0.0.0.0:8080\n'; else printf '0.0.0.0:%s\n' "${HTTP_PORT:-80}"; fi ;;
+  pull)
+    [[ "$DEPLOY_PULL_POLICY" == always ]] || exit 91
+    [[ "$SCENARIO" != pull-fails ]] || exit 7 ;;
+  'exec -T db sh -c pg_dump '*)
+    [[ "$SCENARIO" != empty-backup ]] || exit 0
+    printf 'test-backup-data'
+    [[ "$SCENARIO" != backup-fails ]] || exit 6 ;;
+  'up -d --wait --wait-timeout 120 --pull never db') [[ "$SCENARIO" != database-fails ]] || exit 5 ;;
+  'run --rm --no-deps migrate')
+    [[ "$DEPLOY_PULL_POLICY" == never ]] || exit 91
+    [[ "$SCENARIO" != migration-fails ]] || exit 8 ;;
+  'up -d --no-build --pull never --remove-orphans') [[ "$SCENARIO" != start-fails ]] || exit 9 ;;
+  'up -d --no-deps --no-build --pull never api web') [[ "$SCENARIO" != rollback-start-fails ]] || exit 10 ;;
+  *) echo "Unexpected Docker command: $*" >&2; exit 90 ;;
 esac
-exit 0
 MOCK
   cat > "$fixture/bin/curl" <<'MOCK'
 #!/usr/bin/env bash
-[[ "$SCENARIO" != health-fails ]]
+printf 'curl %s|%s\n' "$*" "$API_IMAGE" >> "$CALL_LOG"
+if [[ "$API_IMAGE" == *:new ]]; then
+  case "$SCENARIO" in health-fails|rollback-start-fails|rollback-health-fails) exit 22 ;; esac
+fi
+[[ "$SCENARIO" != rollback-health-fails ]]
 MOCK
-  printf '#!/usr/bin/env bash\nexit 0\n' > "$fixture/bin/sleep"
+  if [[ "$scenario" == locked ]]; then printf '#!/usr/bin/env bash\nexit 1\n' > "$fixture/bin/flock"; fi
   chmod +x "$fixture/bin/"*
-  code=0
-  API_IMAGE=ghcr.io/example/api:new WEB_IMAGE=ghcr.io/example/web:new \
-    SCENARIO="$scenario" CALL_LOG="$fixture/calls.log" PATH="$fixture/bin:$PATH" \
-    bash "$fixture/scripts/deploy.sh" > "$fixture/output.log" 2>&1 || code=$?
-
-  backup_line="$(grep -n 'pg_dump' "$fixture/calls.log" | cut -d: -f1)"
-  database_line="$(grep -n 'up -d --wait db' "$fixture/calls.log" | cut -d: -f1)"
-  [[ -n "$backup_line" && -n "$database_line" && "$backup_line" -lt "$database_line" ]]
-  if [[ "$scenario" == healthy ]]; then
-    [[ "$code" == 0 ]]
-    grep -qF 'API_IMAGE=ghcr.io/example/api:new' "$fixture/.deploy-images.env"
-    cmp "$fixture/known-old.env" "$fixture/.previous-images.env"
-  else
-    [[ "$code" != 0 ]]
-    cmp "$fixture/known-old.env" "$fixture/.deploy-images.env"
-    if [[ "$scenario" == migration-fails ]]; then
-      ! grep -qF 'up -d --no-build --remove-orphans' "$fixture/calls.log"
-    else
-      grep -qF 'up -d --no-deps --no-build api web|ghcr.io/example/api:old|ghcr.io/example/web:old' "$fixture/calls.log"
-    fi
-  fi
+  export SCENARIO="$scenario" API_IMAGE=ghcr.io/example/api:new WEB_IMAGE=ghcr.io/example/web:new
+  if [[ "$scenario" == env-port ]]; then export HTTP_PORT=18080; else unset HTTP_PORT; fi
+  run_script deploy.sh
+  case "$scenario" in
+    healthy|first-deploy|env-port|default-port)
+      assert_success
+      grep -qF 'API_IMAGE=ghcr.io/example/api:new' "$fixture/.deploy-images.env"
+      assert_called 'up -d --no-build --pull never --remove-orphans'
+      if [[ "$scenario" == env-port ]]; then assert_called 'http://127.0.0.1:18080/api/health/ready'; fi
+      if [[ "$scenario" == default-port ]]; then assert_called 'http://127.0.0.1:8080/api/health/ready'; fi
+      if [[ "$scenario" == first-deploy ]]; then assert_not_called pg_dump; fi ;;
+    *)
+      assert_failure
+      cmp "$fixture/known-old.env" "$fixture/.deploy-images.env"
+      case "$scenario" in
+        start-fails|health-fails|rollback-start-fails|rollback-health-fails)
+          assert_called 'up -d --no-deps --no-build --pull never api web|ghcr.io/example/api:old|ghcr.io/example/web:old'
+          case "$scenario" in
+            start-fails|health-fails) grep -qF 'restored and healthy' "$fixture/output.log" ;;
+            *) grep -qF 'Rollback failed' "$fixture/output.log" ;;
+          esac ;;
+        *) assert_not_called 'up -d --no-build --pull never --remove-orphans' ;;
+      esac ;;
+  esac
+  case "$scenario" in
+    healthy|database-fails|migration-fails|start-fails|health-fails)
+      backup_line="$(grep -n pg_dump "$CALL_LOG" | cut -d: -f1)"
+      database_line="$(grep -n 'up -d --wait' "$CALL_LOG" | cut -d: -f1)"
+      [[ "$backup_line" -lt "$database_line" ]] ;;
+  esac
   [[ ! -e "$fixture/.deploy-images.env.tmp" ]]
+  if [[ -d "$fixture/backups" ]]; then [[ -z "$(find "$fixture/backups" -name '*.tmp' -print)" ]]; fi
   printf 'PASS: deployment %s\n' "$scenario"
-  cleanup
-  fixture=''
 done

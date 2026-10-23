@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+# shellcheck source=tests/ops/helpers.sh
+source "$(dirname "$0")/helpers.sh"
+
+for scenario in valid existing invalid-octet too-many-octets missing-argument random-fails; do
+  new_fixture
+  if [[ "$scenario" != existing ]]; then rm -- "$fixture/.env"; fi
+  cat > "$fixture/bin/docker" <<'MOCK'
+#!/usr/bin/env bash
+[[ "$*" == 'compose version' ]]
+MOCK
+  if [[ "$scenario" == random-fails ]]; then printf '#!/usr/bin/env bash\nexit 1\n' > "$fixture/bin/openssl"; fi
+  chmod +x "$fixture/bin/"*
+  case "$scenario" in
+    invalid-octet) run_script bootstrap.sh 999.1.2.3 ;;
+    too-many-octets) run_script bootstrap.sh 1.2.3.4.5 ;;
+    missing-argument) run_script bootstrap.sh ;;
+    *) run_script bootstrap.sh 203.0.113.10 ;;
+  esac
+  case "$scenario" in
+    valid)
+      assert_success
+      grep -qFx 'PUBLIC_ORIGIN=http://203.0.113.10' "$fixture/.env"
+      grep -qE '^DB_PASSWORD=[0-9a-f]{64}$' "$fixture/.env"
+      grep -qE '^GRAFANA_PASSWORD=[0-9a-f]{48}$' "$fixture/.env"
+      [[ "$(stat -c %a "$fixture/.env")" == 600 ]] ;;
+    existing)
+      assert_success
+      [[ "$(cat "$fixture/.env")" == HTTP_PORT=80 ]] ;;
+    *) assert_failure; [[ ! -e "$fixture/.env" ]] ;;
+  esac
+  printf 'PASS: bootstrap %s\n' "$scenario"
+done
