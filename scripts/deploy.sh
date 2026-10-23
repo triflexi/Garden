@@ -6,7 +6,11 @@ exec 9>.deploy.lock
 flock -n 9 || { echo 'A deployment is already running' >&2; exit 1; }
 : "${API_IMAGE:?Set API_IMAGE to an immutable image tag}"
 : "${WEB_IMAGE:?Set WEB_IMAGE to an immutable image tag}"
-[[ -f .env ]] || { echo 'Run bootstrap.sh first' >&2; exit 1; }
+if [[ ! -e .env ]]; then
+  : "${DEPLOY_HOST:?Set DEPLOY_HOST for automatic first deployment}"
+  HTTP_PORT="${DEPLOY_HTTP_PORT:-80}" bash scripts/bootstrap.sh "${DEPLOY_PUBLIC_HOST:-$DEPLOY_HOST}"
+fi
+[[ -f .env && -r .env ]] || { echo 'The application .env must be a readable regular file.' >&2; exit 1; }
 compose=(docker compose -f compose.yaml -f compose.prod.yaml)
 export DEPLOY_PULL_POLICY=always
 "${compose[@]}" config --quiet

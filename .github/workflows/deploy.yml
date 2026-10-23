@@ -68,8 +68,11 @@ jobs:
   deploy:
     needs: publish
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     environment: production
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,17 +84,10 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_PATH: ${{ vars.DEPLOY_PATH || '/opt/listva' }}
+          DEPLOY_PUBLIC_HOST: ${{ vars.PUBLIC_HOST || secrets.DEPLOY_HOST }}
+          DEPLOY_HTTP_PORT: ${{ vars.HTTP_PORT || '80' }}
           API_IMAGE: ${{ needs.publish.outputs.api }}
           WEB_IMAGE: ${{ needs.publish.outputs.web }}
-        run: |
-          set -Eeuo pipefail
-          [[ "$DEPLOY_PATH" =~ ^/[a-zA-Z0-9_/-]+$ ]]
-          [[ "$DEPLOY_HOST" =~ ^[a-zA-Z0-9.-]+$ ]]
-          [[ "$DEPLOY_USER" =~ ^[a-zA-Z0-9_-]+$ ]]
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/id_ed25519 ~/.ssh/known_hosts
-          tar -czf deploy.tar.gz compose.yaml compose.prod.yaml infra/monitoring scripts
-          scp -o BatchMode=yes deploy.tar.gz "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/deploy.tar.gz"
-          ssh -o BatchMode=yes "$DEPLOY_USER@$DEPLOY_HOST" "cd '$DEPLOY_PATH' && tar -xzf deploy.tar.gz && API_IMAGE='$API_IMAGE' WEB_IMAGE='$WEB_IMAGE' bash scripts/deploy.sh"
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/deploy-ssh.sh
