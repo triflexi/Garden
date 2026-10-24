@@ -19,3 +19,13 @@ apps/api/generated/
 deploy.tar.gz
 .lock-refresh/
 .audit-report.json
+
+.agents/
+.codex/
+.claude/
+.cursor/
+.aider/
+.continue/
+.gemini/
+.opencode/
+.windsurf/
